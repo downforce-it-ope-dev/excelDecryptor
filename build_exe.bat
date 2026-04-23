@@ -6,7 +6,7 @@ set PYTHON_EXE=C:\Users\downforceITkkt\.cache\codex-runtimes\codex-primary-runti
   --clean ^
   --windowed ^
   --onefile ^
-  --name ExcelDecryptor ^
+  --name dftsExcelDecryptor ^
   --add-data "templates;templates" ^
   --add-data "update_config.json;." ^
   launcher.py
