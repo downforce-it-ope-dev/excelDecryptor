@@ -13,4 +13,4 @@ set PYTHON_EXE=C:\Users\downforceITkkt\.cache\codex-runtimes\codex-primary-runti
 
 echo.
 echo Build finished.
-echo EXE path: dist\ExcelDecryptor.exe
+echo EXE path: dist\dftsExcelDecryptor.exe
