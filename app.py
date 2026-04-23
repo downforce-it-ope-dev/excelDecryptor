@@ -13,7 +13,7 @@ app.config["MAX_CONTENT_LENGTH"] = 50 * 1024 * 1024  # 50MB
 
 ALLOWED_EXTENSIONS = {".xls", ".xlsx", ".xlsm", ".xlsb"}
 DEFAULT_PASSWORD = "minhwa6331^^!!"
-CLIENT_TIMEOUT_SECONDS = 15
+CLIENT_TIMEOUT_SECONDS = 8
 
 active_clients = {}
 client_lock = threading.Lock()

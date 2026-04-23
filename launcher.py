@@ -38,18 +38,25 @@ def open_browser() -> None:
 
 
 def stop_when_no_browser(server) -> None:
+    # 브라우저가 한 번이라도 뜬 적이 있었는지.
     had_client = False
+    # 브라우저가 아예 안 열리는 비정상 상황 대비용 grace period.
+    # 시작 후 이 시간까지도 client가 없으면 그냥 종료한다.
+    startup_grace_deadline = time.time() + 30
 
     while True:
         if has_active_clients():
             had_client = True
-        elif had_client:
-            time.sleep(2)
-            if not has_active_clients():
-                server.shutdown()
-                return
+        else:
+            should_check_shutdown = had_client or time.time() > startup_grace_deadline
+            if should_check_shutdown:
+                # 짧은 재확인 (네트워크 블립/ping 경합 방지)
+                time.sleep(0.5)
+                if not has_active_clients():
+                    server.shutdown()
+                    return
 
-        time.sleep(1)
+        time.sleep(0.5)
 
 
 def load_manifest_url() -> str:
@@ -252,6 +259,10 @@ def main() -> None:
         watcher_thread.start()
 
         server.serve_forever()
+
+    # wsgiref/PyInstaller bootloader 잔류로 태스크 매니저에 프로세스가
+    # 남는 것을 막기 위해 명시적으로 프로세스를 종료한다.
+    os._exit(0)
 
 
 if __name__ == "__main__":
