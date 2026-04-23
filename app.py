@@ -11,6 +11,16 @@ from flask import Flask, jsonify, render_template, request, send_file
 app = Flask(__name__)
 app.config["MAX_CONTENT_LENGTH"] = 50 * 1024 * 1024  # 50MB
 
+
+@app.after_request
+def _disable_cache(response):
+    # 로컬 앱이므로 브라우저 캐시 완전 비활성.
+    # 업데이트 후 이전 버전 UI가 캐시로 뜨는 문제 방지.
+    response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+    response.headers["Pragma"] = "no-cache"
+    response.headers["Expires"] = "0"
+    return response
+
 ALLOWED_EXTENSIONS = {".xls", ".xlsx", ".xlsm", ".xlsb"}
 DEFAULT_PASSWORD = "minhwa6331^^!!"
 CLIENT_TIMEOUT_SECONDS = 8

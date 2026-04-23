@@ -33,8 +33,11 @@ def log_update(message: str) -> None:
 
 
 def open_browser() -> None:
-    url = f"http://{HOST}:{PORT}"
-    webbrowser.open(url)
+    # URL에 버전 + 타임스탬프 query를 붙여 기존 탭 재사용/캐시를 회피한다.
+    # 매번 다른 URL이라 브라우저가 새 리소스로 인식하고 fresh fetch 한다.
+    url = f"http://{HOST}:{PORT}/?v={APP_VERSION}&t={int(time.time())}"
+    # new=2: 가능하면 새 탭으로 열기
+    webbrowser.open(url, new=2)
 
 
 def stop_when_no_browser(server) -> None:
