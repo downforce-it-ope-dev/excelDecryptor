@@ -1,4 +1,5 @@
-import json
+﻿import json
+import os
 import socket
 import subprocess
 import sys
@@ -18,6 +19,16 @@ from app_version import APP_VERSION
 HOST = "127.0.0.1"
 PORT = 5000
 UPDATE_CONFIG_PATH = Path(__file__).with_name("update_config.json")
+UPDATE_LOG_PATH = Path.home() / "dftsExcelDecryptor_update.log"
+
+
+def log_update(message: str) -> None:
+    try:
+        timestamp = time.strftime("%Y-%m-%d %H:%M:%S")
+        with open(UPDATE_LOG_PATH, "a", encoding="utf-8") as file_obj:
+            file_obj.write(f"[{timestamp}] {message}\n")
+    except Exception:
+        pass
 
 
 def is_port_open(host: str, port: int) -> bool:
@@ -55,7 +66,8 @@ def load_manifest_url() -> str:
         with open(UPDATE_CONFIG_PATH, "r", encoding="utf-8") as file_obj:
             config = json.load(file_obj)
         return str(config.get("manifest_url", "")).strip()
-    except Exception:
+    except Exception as exc:
+        log_update(f"manifest url read failed: {exc}")
         return ""
 
 
@@ -97,28 +109,43 @@ def ask_update(latest_version: str) -> bool:
     return result
 
 
-def write_update_script(current_exe: Path, downloaded_exe: Path) -> Path:
+def write_update_script(current_exe: Path, downloaded_exe: Path, current_pid: int) -> Path:
     script_path = downloaded_exe.with_name("apply_update.cmd")
+    log_path = UPDATE_LOG_PATH
     script_content = "\r\n".join(
         [
             "@echo off",
             "setlocal enableextensions",
             f'set "SRC={downloaded_exe}"',
             f'set "DST={current_exe}"',
+            f'set "PID={current_pid}"',
+            f'set "LOG={log_path}"',
+            'echo [%date% %time%] updater script started >> "%LOG%"',
             "",
-            "for /L %%i in (1,1,30) do (",
-            '  taskkill /F /IM "%~nx0" > nul 2>&1',
-            '  copy /Y "%SRC%" "%DST%" > nul 2>&1',
-            "  if not errorlevel 1 goto success",
+            "for /L %%i in (1,1,60) do (",
+            '  tasklist /FI "PID eq %PID%" | find "%PID%" > nul',
+            "  if errorlevel 1 goto replace",
+            '  echo [%date% %time%] waiting for process %PID% to exit >> "%LOG%"',
             "  timeout /t 1 /nobreak > nul",
             ")",
+            'echo [%date% %time%] timeout waiting for old process exit >> "%LOG%"',
+            "goto end",
             "",
-            'msg * "업데이트 파일 교체에 실패했습니다. 프로그램을 완전히 종료한 뒤 다시 시도해주세요."',
+            ":replace",
+            "for /L %%i in (1,1,30) do (",
+            '  copy /Y "%SRC%" "%DST%" > nul 2>&1',
+            "  if not errorlevel 1 goto success",
+            '  echo [%date% %time%] copy retry %%i failed >> "%LOG%"',
+            "  timeout /t 1 /nobreak > nul",
+            ")",
+            'echo [%date% %time%] failed to replace executable >> "%LOG%"',
             "goto end",
             "",
             ":success",
+            'echo [%date% %time%] executable replaced successfully >> "%LOG%"',
             'start "" "%DST%"',
             'del "%SRC%" > nul 2>&1',
+            'echo [%date% %time%] restarted updated executable >> "%LOG%"',
             "",
             ":end",
             'del "%~f0" > nul 2>&1',
@@ -133,35 +160,51 @@ def run_updater_if_needed() -> bool:
     executable_path = Path(sys.executable)
 
     if not manifest_url:
+        log_update("manifest url missing")
         return False
 
     if executable_path.suffix.lower() != ".exe":
+        log_update(f"skip updater in non-exe mode: {executable_path}")
         return False
 
     try:
+        log_update(f"current version={APP_VERSION}")
+        log_update(f"manifest url={manifest_url}")
+
         manifest = load_manifest(manifest_url)
         latest_version = str(manifest.get("version", "")).strip()
         download_url = str(manifest.get("download_url", "")).strip()
 
+        log_update(f"latest version={latest_version}")
+        log_update(f"download url={download_url}")
+
         if not latest_version or not download_url:
+            log_update("manifest missing version or download url")
             return False
 
         if parse_version(latest_version) <= parse_version(APP_VERSION):
+            log_update("already latest version")
             return False
 
         if not ask_update(latest_version):
+            log_update("user cancelled update")
             return False
 
         downloaded_exe = download_update(download_url)
-        update_script = write_update_script(executable_path, downloaded_exe)
+        log_update(f"downloaded update to {downloaded_exe}")
+
+        update_script = write_update_script(executable_path, downloaded_exe, os.getpid())
+        log_update(f"created update script {update_script}")
 
         subprocess.Popen(
             ["cmd", "/c", str(update_script)],
             close_fds=True,
             creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
         )
+        log_update("spawned update script and exiting current app")
         return True
-    except Exception:
+    except Exception as exc:
+        log_update(f"updater failed: {exc}")
         return False
 
 
