@@ -5,7 +5,7 @@ a = Analysis(
     ['launcher.py'],
     pathex=[],
     binaries=[],
-    datas=[('templates', 'templates')],
+    datas=[('templates', 'templates'), ('update_config.json', '.')],
     hiddenimports=[],
     hookspath=[],
     hooksconfig={},
