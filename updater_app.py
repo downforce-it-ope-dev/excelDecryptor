@@ -99,13 +99,20 @@ def replace_executable(source: Path, destination: Path, log_path: Path) -> None:
             os.replace(str(source), str(destination))
             log_message(log_path, f"replace succeeded on attempt {attempt}")
 
-            # 성공했으면 백업 및 temp 디렉터리 정리
-            try:
-                if backup.exists():
+            # 성공했으면 백업 및 temp 디렉터리 정리.
+            # Defender 실시간 검사가 방금 이동된 exe 핸들을 잠깐 쥐고 있어
+            # 즉시 unlink가 거부될 수 있으므로 짧게 재시도한다.
+            for _ in range(6):
+                if not backup.exists():
+                    break
+                try:
                     backup.unlink()
-                shutil.rmtree(backup_dir, ignore_errors=True)
-            except Exception as cleanup_exc:
-                log_message(log_path, f"backup cleanup warning: {cleanup_exc}")
+                    break
+                except Exception:
+                    time.sleep(0.5)
+            # 남은 파일/디렉터리는 ignore_errors로 조용히 처리.
+            # 끝까지 못 지워도 %TEMP%라 OS가 자체 정리하므로 로그 오염 방지.
+            shutil.rmtree(backup_dir, ignore_errors=True)
             return
         except Exception as exc:
             last_error = exc
