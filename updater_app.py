@@ -73,31 +73,50 @@ class UpdateError(Exception):
 
 
 def replace_executable(source: Path, destination: Path, log_path: Path) -> None:
-    backup = destination.with_suffix(destination.suffix + ".bak")
-
-    if backup.exists():
-        backup.unlink()
+    # .bak을 destination 옆(바탕화면 등)이 아니라 시스템 temp 디렉터리에 둔다.
+    # OneDrive 동기화, 제어된 폴더 액세스(Controlled Folder Access),
+    # 일부 백신의 랜섬웨어 휴리스틱이 보호 폴더에서의 .bak 생성을 차단하는 문제 회피.
+    backup_dir = Path(tempfile.mkdtemp(prefix="dfts_excel_decryptor_backup_"))
+    backup = backup_dir / f"{destination.name}.bak.{int(time.time())}"
+    log_message(log_path, f"backup target={backup}")
 
     last_error = None
     for attempt in range(1, 31):
         try:
-            if backup.exists():
-                backup.unlink()
             if destination.exists():
-                destination.replace(backup)
-            os.replace(source, destination)
-            if backup.exists():
-                backup.unlink()
+                # 1차: temp로 백업 이동
+                try:
+                    os.replace(str(destination), str(backup))
+                except Exception as backup_exc:
+                    # 백업 이동이 실패하면 폴백: 기존 파일을 바로 삭제
+                    log_message(
+                        log_path,
+                        f"attempt {attempt} backup move failed, falling back to unlink: {backup_exc}",
+                    )
+                    destination.unlink()
+
+            # 2차: 새 exe를 제자리에 배치
+            os.replace(str(source), str(destination))
             log_message(log_path, f"replace succeeded on attempt {attempt}")
+
+            # 성공했으면 백업 및 temp 디렉터리 정리
+            try:
+                if backup.exists():
+                    backup.unlink()
+                shutil.rmtree(backup_dir, ignore_errors=True)
+            except Exception as cleanup_exc:
+                log_message(log_path, f"backup cleanup warning: {cleanup_exc}")
             return
         except Exception as exc:
             last_error = exc
             log_message(log_path, f"replace attempt {attempt} failed: {exc}")
             time.sleep(1)
 
+    # 모든 시도 실패: 가능하면 원상복구
     if backup.exists() and not destination.exists():
         try:
-            backup.replace(destination)
+            os.replace(str(backup), str(destination))
+            log_message(log_path, "restored destination from backup")
         except Exception as exc:
             log_message(log_path, f"backup restore failed: {exc}")
 
