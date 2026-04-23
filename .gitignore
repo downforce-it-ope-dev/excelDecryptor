@@ -1,5 +1,7 @@
 ﻿build/
 dist/
+updater_build/
+updater_dist/
 __pycache__/
 *.pyc
 *.pyo
