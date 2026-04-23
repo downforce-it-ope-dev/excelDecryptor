@@ -1,6 +1,6 @@
 ﻿import json
 import os
-import socket
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -20,6 +20,7 @@ HOST = "127.0.0.1"
 PORT = 5000
 UPDATE_CONFIG_PATH = Path(__file__).with_name("update_config.json")
 UPDATE_LOG_PATH = Path.home() / "dftsExcelDecryptor_update.log"
+UPDATER_EXE_NAME = "dftsExcelDecryptorUpdater.exe"
 
 
 def log_update(message: str) -> None:
@@ -31,19 +32,9 @@ def log_update(message: str) -> None:
         pass
 
 
-def is_port_open(host: str, port: int) -> bool:
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
-        sock.settimeout(0.5)
-        return sock.connect_ex((host, port)) == 0
-
-
 def open_browser() -> None:
     url = f"http://{HOST}:{PORT}"
-    for _ in range(30):
-        if is_port_open(HOST, PORT):
-            webbrowser.open(url)
-            return
-        time.sleep(0.2)
+    webbrowser.open(url)
 
 
 def stop_when_no_browser(server) -> None:
@@ -82,17 +73,14 @@ def parse_version(version_text: str) -> tuple[int, ...]:
 
 
 def load_manifest(manifest_url: str) -> dict:
-    with urllib.request.urlopen(manifest_url, timeout=10) as response:
+    with urllib.request.urlopen(manifest_url, timeout=15) as response:
         return json.loads(response.read().decode("utf-8"))
 
 
-def download_update(download_url: str) -> Path:
-    temp_dir = Path(tempfile.mkdtemp(prefix="excel_decryptor_update_"))
-    target_path = temp_dir / "dftsExcelDecryptor.exe"
-
-    with urllib.request.urlopen(download_url, timeout=60) as response, open(target_path, "wb") as file_obj:
-        file_obj.write(response.read())
-
+def download_update(download_url: str, work_dir: Path) -> Path:
+    target_path = work_dir / "dftsExcelDecryptor.exe"
+    with urllib.request.urlopen(download_url, timeout=120) as response, open(target_path, "wb") as file_obj:
+        shutil.copyfileobj(response, file_obj)
     return target_path
 
 
@@ -102,57 +90,25 @@ def ask_update(latest_version: str) -> bool:
     root.attributes("-topmost", True)
     result = messagebox.askyesno(
         "업데이트 확인",
-        f"새 버전({latest_version})이 있습니다.\n업데이트 후 프로그램을 다시 실행할까요?",
+        f"새 버전({latest_version})이 있습니다.\n업데이트를 진행할까요?",
         parent=root,
     )
+    if result:
+        messagebox.showinfo(
+            "업데이트 진행",
+            "업데이트 파일을 다운로드하고 있습니다.\n잠시 후 프로그램이 자동으로 다시 실행됩니다.",
+            parent=root,
+        )
     root.destroy()
     return result
 
 
-def write_update_script(current_exe: Path, downloaded_exe: Path, current_pid: int) -> Path:
-    script_path = downloaded_exe.with_name("apply_update.cmd")
-    log_path = UPDATE_LOG_PATH
-    script_content = "\r\n".join(
-        [
-            "@echo off",
-            "setlocal enableextensions",
-            f'set "SRC={downloaded_exe}"',
-            f'set "DST={current_exe}"',
-            f'set "PID={current_pid}"',
-            f'set "LOG={log_path}"',
-            'echo [%date% %time%] updater script started >> "%LOG%"',
-            "",
-            "for /L %%i in (1,1,60) do (",
-            '  tasklist /FI "PID eq %PID%" | find "%PID%" > nul',
-            "  if errorlevel 1 goto replace",
-            '  echo [%date% %time%] waiting for process %PID% to exit >> "%LOG%"',
-            "  timeout /t 1 /nobreak > nul",
-            ")",
-            'echo [%date% %time%] timeout waiting for old process exit >> "%LOG%"',
-            "goto end",
-            "",
-            ":replace",
-            "for /L %%i in (1,1,30) do (",
-            '  copy /Y "%SRC%" "%DST%" > nul 2>&1',
-            "  if not errorlevel 1 goto success",
-            '  echo [%date% %time%] copy retry %%i failed >> "%LOG%"',
-            "  timeout /t 1 /nobreak > nul",
-            ")",
-            'echo [%date% %time%] failed to replace executable >> "%LOG%"',
-            "goto end",
-            "",
-            ":success",
-            'echo [%date% %time%] executable replaced successfully >> "%LOG%"',
-            'start "" "%DST%"',
-            'del "%SRC%" > nul 2>&1',
-            'echo [%date% %time%] restarted updated executable >> "%LOG%"',
-            "",
-            ":end",
-            'del "%~f0" > nul 2>&1',
-        ]
-    )
-    script_path.write_text(script_content, encoding="utf-8")
-    return script_path
+def get_bundled_updater_path() -> Path | None:
+    base_dir = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent))
+    updater_path = base_dir / UPDATER_EXE_NAME
+    if updater_path.exists():
+        return updater_path
+    return None
 
 
 def run_updater_if_needed() -> bool:
@@ -190,18 +146,24 @@ def run_updater_if_needed() -> bool:
             log_update("user cancelled update")
             return False
 
-        downloaded_exe = download_update(download_url)
-        log_update(f"downloaded update to {downloaded_exe}")
+        updater_source = get_bundled_updater_path()
+        if updater_source is None:
+            log_update("bundled updater exe not found")
+            return False
 
-        update_script = write_update_script(executable_path, downloaded_exe, os.getpid())
-        log_update(f"created update script {update_script}")
+        work_dir = Path(tempfile.mkdtemp(prefix="dfts_excel_decryptor_update_"))
+        downloaded_exe = download_update(download_url, work_dir)
+        updater_target = work_dir / UPDATER_EXE_NAME
+        shutil.copy2(updater_source, updater_target)
+
+        log_update(f"downloaded update to {downloaded_exe}")
+        log_update(f"copied updater helper to {updater_target}")
 
         subprocess.Popen(
-            ["cmd", "/c", str(update_script)],
+            [str(updater_target), str(downloaded_exe), str(executable_path), str(os.getpid()), str(UPDATE_LOG_PATH)],
             close_fds=True,
-            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
         )
-        log_update("spawned update script and exiting current app")
+        log_update("spawned updater helper and exiting current app")
         return True
     except Exception as exc:
         log_update(f"updater failed: {exc}")
